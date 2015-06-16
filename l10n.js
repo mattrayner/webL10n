@@ -176,6 +176,10 @@ document.webL10n = (function(window, document, undefined) {
 
     // handle escaped characters (backslashes) in a string
     function evalString(text) {
+      if (typeof text == 'undefined') {
+        return '';
+      }
+
       if (text.lastIndexOf('\\') < 0)
         return text;
       return text.replace(/\\\\/g, '\\')
@@ -187,7 +191,8 @@ document.webL10n = (function(window, document, undefined) {
                  .replace(/\\{/g, '{')
                  .replace(/\\}/g, '}')
                  .replace(/\\"/g, '"')
-                 .replace(/\\'/g, "'");
+                 .replace(/\\'/g, "'")
+                 .replace(/\\/g, '\n');
     }
 
     // parse *.properties text data into an l10n dictionary
@@ -197,7 +202,6 @@ document.webL10n = (function(window, document, undefined) {
       var dictionary = {};
 
       // token expressions
-      var reBlank = /^\s*|\s*$/;
       var reComment = /^\s*#|^\s*$/;
       var reSection = /^\s*\[(.*)\]\s*$/;
       var reImport = /^\s*@import\s+url\((.*)\)\s*$/i;
@@ -205,7 +209,7 @@ document.webL10n = (function(window, document, undefined) {
 
       // parse the *.properties file into an associative array
       function parseRawLines(rawText, extendedSyntax, parsedRawLinesCallback) {
-        var entries = rawText.replace(reBlank, '').split(/[\r\n]+/);
+        var entries = rawText.split(/[\r\n]+/);
         var currentLang = '*';
         var genericLang = lang.split('-', 1)[0];
         var skipLang = false;
@@ -219,40 +223,70 @@ document.webL10n = (function(window, document, undefined) {
               parsedRawLinesCallback();
               return;
             }
-            var line = entries.shift();
 
-            // comment or blank line?
-            if (reComment.test(line))
-              continue;
+            var line = processLine(entries.shift(), extendedSyntax);
 
-            // the extended syntax supports [lang] sections and @import rules
-            if (extendedSyntax) {
-              match = reSection.exec(line);
-              if (match) { // section start?
-                // RFC 4646, section 4.4, "All comparisons MUST be performed
-                // in a case-insensitive manner."
-
-                currentLang = match[1].toLowerCase();
-                skipLang = (currentLang !== '*') &&
-                    (currentLang !== lang) && (currentLang !== genericLang);
-                continue;
-              } else if (skipLang) {
-                continue;
-              }
-              match = reImport.exec(line);
-              if (match) { // @import rule?
-                loadImport(baseURL + match[1], nextEntry);
-                return;
-              }
-            }
-
-            // key-value pair
             var tmp = line.match(reSplit);
             if (tmp && tmp.length == 3) {
               dictionary[tmp[1]] = evalString(tmp[2]);
+
+              if (hasEOLDelimeter(line)) {
+                dictionary[tmp[1]] += evalString(processMultiLine(entries.shift(), extendedSyntax));
+              }
             }
           }
         }
+
+        function processMultiLine(line, extendedSyntax) {
+          line = processLine(line, extendedSyntax);
+
+          // Does this line have an EOL delimeter?
+          if (hasEOLDelimeter(line)) {
+            // Append the next line to our current line and return
+            return line + '\n' + processMultiLine(entries.shift(), extendedSyntax);
+          } else { // There is EOL delimeter
+            return line;
+          }
+        }
+
+        //Process a line and return a string
+        function processLine(line, extendedSyntax) {
+          line = line.trim();
+
+          var match;
+
+          // comment or blank line?
+          if (reComment.test(line))
+            return '';
+
+          // the extended syntax supports [lang] sections and @import rules
+          if (extendedSyntax) {
+            match = reSection.exec(line);
+            if (match) { // section start?
+              // RFC 4646, section 4.4, "All comparisons MUST be performed
+              // in a case-insensitive manner."
+
+              currentLang = match[1].toLowerCase();
+              skipLang = (currentLang !== '*') &&
+                  (currentLang !== lang) && (currentLang !== genericLang);
+              return '';
+            } else if (skipLang) {
+              return '';
+            }
+            match = reImport.exec(line);
+            if (match) { // @import rule?
+              loadImport(baseURL + match[1], nextEntry);
+              return '';
+            }
+          }
+
+          return line;
+        }
+
+        function hasEOLDelimeter(line) {
+          return (line.substr(-1) == '\\');
+        }
+
         nextEntry();
       }
 
@@ -751,9 +785,9 @@ document.webL10n = (function(window, document, undefined) {
       },
       '20': function(n) {
         if ((isBetween((n % 10), 3, 4) || ((n % 10) == 9)) && !(
-            isBetween((n % 100), 10, 19) ||
-            isBetween((n % 100), 70, 79) ||
-            isBetween((n % 100), 90, 99)
+                isBetween((n % 100), 10, 19) ||
+                isBetween((n % 100), 70, 79) ||
+                isBetween((n % 100), 90, 99)
             ))
           return 'few';
         if ((n % 1000000) === 0 && n !== 0)
@@ -850,10 +884,10 @@ document.webL10n = (function(window, document, undefined) {
     }
 
     /** This is where l10n expressions should be processed.
-      * The plan is to support C-style expressions from the l20n project;
-      * until then, only two kinds of simple expressions are supported:
-      *   {[ index ]} and {{ arguments }}.
-      */
+     * The plan is to support C-style expressions from the l20n project;
+     * until then, only two kinds of simple expressions are supported:
+     *   {[ index ]} and {{ arguments }}.
+     */
     var rv = {};
     for (var prop in data) {
       var str = data[prop];
@@ -998,7 +1032,7 @@ document.webL10n = (function(window, document, undefined) {
 
     // most browsers expose the UI language as `navigator.language'
     // but IE uses `navigator.userLanguage' instead
-    var userLocale = navigator.language || navigator.userLanguage;
+    var userLocale = document.documentElement.lang || navigator.language || navigator.userLanguage;
     consoleLog('loading [' + userLocale + '] resources, ' +
         (gAsyncResourceLoading ? 'asynchronously.' : 'synchronously.'));
 
@@ -1038,8 +1072,8 @@ document.webL10n = (function(window, document, undefined) {
       xhrLoadText = function(url, onSuccess, onFailure) {
         onSuccess = onSuccess || function _onSuccess(data) {};
         onFailure = onFailure || function _onFailure() {
-          consoleWarn(url + ' not found.');
-        };
+              consoleWarn(url + ' not found.');
+            };
         var xhr = new ActiveXObject('Microsoft.XMLHTTP');
         xhr.open('GET', url, gAsyncResourceLoading);
         xhr.onreadystatechange = function() {
@@ -1204,4 +1238,3 @@ document.webL10n = (function(window, document, undefined) {
 if (window._ === undefined) {
   var _ = document.webL10n.get;
 }
-
