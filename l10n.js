@@ -1,4 +1,5 @@
 /**
+ * Copyright (c) 2015 Matthew Rayner
  * Copyright (c) 2011-2013 Fabien Cazenave, Mozilla.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -118,8 +119,8 @@ document.webL10n = (function(window, document, undefined) {
   function xhrLoadText(url, onSuccess, onFailure) {
     onSuccess = onSuccess || function _onSuccess(data) {};
     onFailure = onFailure || function _onFailure() {
-      consoleWarn(url + ' not found.');
-    };
+          consoleWarn(url + ' not found.');
+        };
 
     var xhr = new XMLHttpRequest();
     xhr.open('GET', url, gAsyncResourceLoading);
@@ -183,16 +184,16 @@ document.webL10n = (function(window, document, undefined) {
       if (text.lastIndexOf('\\') < 0)
         return text;
       return text.replace(/\\\\/g, '\\')
-                 .replace(/\\n/g, '\n')
-                 .replace(/\\r/g, '\r')
-                 .replace(/\\t/g, '\t')
-                 .replace(/\\b/g, '\b')
-                 .replace(/\\f/g, '\f')
-                 .replace(/\\{/g, '{')
-                 .replace(/\\}/g, '}')
-                 .replace(/\\"/g, '"')
-                 .replace(/\\'/g, "'")
-                 .replace(/\\/g, '\n');
+          .replace(/\\n/g, '\n')
+          .replace(/\\r/g, '\r')
+          .replace(/\\t/g, '\t')
+          .replace(/\\b/g, '\b')
+          .replace(/\\f/g, '\f')
+          .replace(/\\{/g, '{')
+          .replace(/\\}/g, '}')
+          .replace(/\\"/g, '"')
+          .replace(/\\'/g, "'")
+          .replace(/\\/g, '\n');
     }
 
     // parse *.properties text data into an l10n dictionary
@@ -202,6 +203,7 @@ document.webL10n = (function(window, document, undefined) {
       var dictionary = {};
 
       // token expressions
+      var reBlank = /^\s*|\s*$/;
       var reComment = /^\s*#|^\s*$/;
       var reSection = /^\s*\[(.*)\]\s*$/;
       var reImport = /^\s*@import\s+url\((.*)\)\s*$/i;
@@ -223,34 +225,47 @@ document.webL10n = (function(window, document, undefined) {
               parsedRawLinesCallback();
               return;
             }
+            var line = entries.shift();
 
-            var line = processLine(entries.shift(), extendedSyntax);
+            // comment or blank line?
+            if (reComment.test(line))
+              continue;
+
+            // the extended syntax supports [lang] sections and @import rules
+            if (extendedSyntax) {
+              match = reSection.exec(line);
+              if (match) { // section start?
+                // RFC 4646, section 4.4, "All comparisons MUST be performed
+                // in a case-insensitive manner."
+
+                currentLang = match[1].toLowerCase();
+                skipLang = (currentLang !== '*') &&
+                    (currentLang !== lang) && (currentLang !== genericLang);
+                continue;
+              } else if (skipLang) {
+                continue;
+              }
+              match = reImport.exec(line);
+              if (match) { // @import rule?
+                loadImport(baseURL + match[1], nextEntry);
+                return;
+              }
+            }
 
             var tmp = line.match(reSplit);
             if (tmp && tmp.length == 3) {
               dictionary[tmp[1]] = evalString(tmp[2]);
 
-              if (hasEOLDelimeter(line)) {
-                dictionary[tmp[1]] += evalString(processMultiLine(entries.shift(), extendedSyntax));
+              if(line.substr(-1) == '\\') {
+                dictionary[tmp[1]] += evalString(getLine(entries.shift(), extendedSyntax));
               }
             }
-          }
-        }
 
-        function processMultiLine(line, extendedSyntax) {
-          line = processLine(line, extendedSyntax);
-
-          // Does this line have an EOL delimeter?
-          if (hasEOLDelimeter(line)) {
-            // Append the next line to our current line and return
-            return line + '\n' + processMultiLine(entries.shift(), extendedSyntax);
-          } else { // There is EOL delimeter
-            return line;
           }
         }
 
         //Process a line and return a string
-        function processLine(line, extendedSyntax) {
+        function getLine(line, extendedSyntax) {
           line = line.trim();
 
           var match;
@@ -280,11 +295,12 @@ document.webL10n = (function(window, document, undefined) {
             }
           }
 
-          return line;
-        }
-
-        function hasEOLDelimeter(line) {
-          return (line.substr(-1) == '\\');
+          if(line.substr(-1).match(/\\/)) {
+            // @todo CHECK DELIMITER
+            return line + '\n' + getLine(entries.shift(), extendedSyntax);
+          } else {
+            return line;
+          }
         }
 
         nextEntry();
@@ -413,6 +429,23 @@ document.webL10n = (function(window, document, undefined) {
       resource.load(lang, onResourceLoaded);
     }
   }
+
+  function loadLocaleFromData(lang, data, callback) {
+    if (lang) {
+      lang = lang.toLowerCase();
+    }
+
+    callback = callback || function _callback() {};
+
+    clear();
+    gLanguage = lang;
+
+    gL10nData = data;
+
+    callback();
+
+    translateFragment();
+  };
 
   // clear all l10n data
   function clear() {
@@ -1003,6 +1036,8 @@ document.webL10n = (function(window, document, undefined) {
 
   // translate an HTML subtree
   function translateFragment(element) {
+    console.log("Translate Fragment");
+
     element = element || document.documentElement;
 
     // check all translatable children (= w/ a `data-l10n-id' attribute)
@@ -1195,6 +1230,10 @@ document.webL10n = (function(window, document, undefined) {
           callback();
         translateFragment();
       });
+    },
+
+    setLanguageWithData: function(lang, data, callback) {
+      loadLocaleFromData(lang, data);
     },
 
     // get the direction (ltr|rtl) of the current language
